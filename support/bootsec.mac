@@ -1,0 +1,130 @@
+; Boot loader for P112 CP/M 3 and MP/M floppies
+; Uses the ROM monitor disk I/O routines
+
+Z80182	equ	0
+	include	Z180.INC
+	include	DPARM.INC
+
+dparm	equ	0Bh
+himem	equ	0C000h
+tpa	equ	100h
+
+; The boot sector is normally loaded & executed at 8000H.
+; The incoming machine state is:
+;	IX - Points to hardware DPB for boot drive
+;	D  - Boot drive no.
+;	E  - Boot-drive type-code
+;	SP - Valid stack-frame
+ 
+	.phase	8000h
+
+boot:
+	jp	load
+
+load:	ld	hl,ldr
+	ld	de,himem
+	ld	bc,size
+	ldir
+	jp	loader
+
+ldr:
+	.dephase
+	.phase	himem
+
+loader:
+	ld	hl,ldmsg
+	rst	20h
+	in0	a,(CBAR)
+	ld	(romon),a
+	and	0F0h
+	ld	(romoff),a
+	ld	hl,tpa
+	ld	b,17		; no. of 512-byte sectors to load
+	ld	e,1		; first sector to load
+	ld	c,0		; begin with track 0 side 0
+	ld	d,0		; drive 0
+loop:
+	call	rdsect
+	djnz	loop
+	ld	a,0dh
+	rst	18h
+	ld	a,0ah
+	rst	18h
+	ld	a,(romoff)
+	out0	(CBAR),a
+	jp	tpa
+
+ldmsg:	db	'Loading...',0
+
+;rst 8:	C = track/side
+;	D = drive (0)
+;	E = sector
+;	HL = load addr
+;	A = 2 = read cmd
+;	B = no of sectors
+;	IX = dpb
+
+rdsect:
+	push	bc
+	push	de
+	push	hl
+
+	ld	ix,(dparm)
+	ld	a,(ix+13)	; add 1st sector offset
+	add	a,e
+	ld	e,a
+	ld	hl,buff		; load to a temp buffer
+	ld	b,1		; single sector
+	ld	a,2		; read command
+	rst	08h		; P112 disk services
+	jr	c,error
+
+;	ld	a,'.'
+;	rst	18h
+
+	ld	hl,64
+	ld	b,(ix+SECSZE)
+	inc	b		; in case it was zero
+sz1:	add	hl,hl
+	djnz	sz1
+	ld	b,h
+	ld	c,l
+	ld	hl,buff
+	pop	de
+	ld	a,(romoff)
+	out0	(CBAR),a
+	ldir
+	ld	a,(romon)
+	out0	(CBAR),a
+
+	ex	de,hl
+	pop	de
+	pop	bc
+
+	inc	e		; increment sector number
+	ld	a,(ix+EOT)	; end of the track?
+	cp	e
+	ret	nc		; no, return
+	ld	e,0		; yes - reset the sector number to zero
+	inc	c		; and increment track number
+	ret
+
+error:
+	ld	hl,errmsg
+	rst	20h
+	pop	hl		; restore regs
+	pop	de		; so they could be examined
+	pop	bc
+	rst	38h		; debugger break point
+
+errmsg:	db	'Load error',0dh,0ah,0
+ 
+romon:	ds	2
+romoff:	ds	2
+
+buff	equ	$
+
+size	equ	$ - loader
+
+	end
+

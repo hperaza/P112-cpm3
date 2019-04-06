@@ -1,0 +1,383 @@
+; Copies the specified system image file to the reserved tracks of
+; the specified disk. CP/M 3.0 only.
+
+; TODO: check for CP/M 3.0
+; TODO: call BIOS_sectran?
+; TODO: better modify the existing PSYSGEN to use CP/M 3 BIOS calls.
+
+	cseg
+
+cr	equ	0Dh
+lf	equ	0Ah
+
+wboot	equ	0
+bdos	equ	5
+cpmfcb	equ	5Ch
+cpmbuf	equ	80h
+
+.putch	equ	2
+.print	equ	9
+.getln	equ	10
+.getdsk	equ	25
+.getdpb	equ	31
+.open	equ	15
+.close	equ	16
+.read	equ	20
+.dma	equ	26
+.biosfn	equ	50
+.parse	equ	152
+
+start:	lxi	sp,stack
+	call	gdisk		; get destination drive
+	call	ldimg		; load system image
+	call	putsys		; save boot tracks
+	jmp	wboot
+
+; Ask for the destination disk and get the number of reserved tracks
+
+gdisk:	mvi	c,.getdsk
+	call	bdos		; get current disk
+	sta	disk		; save as default answer
+gd0:	lxi	d,askd
+	mvi	c,.print
+	call	bdos
+	lda	disk
+	adi	'A'
+	mov	e,a
+	mvi	c,.putch
+	call	bdos
+	lxi	d,askd1
+	mvi	c,.print
+	call	bdos		; prompt for drive
+	lxi	h,cpmbuf
+	mvi	m,125
+	xchg
+	mvi	c,.getln
+	call	bdos		; get response
+	call	crlf
+	lxi	h,cpmbuf
+	inx	h
+	mov	a,m
+	ora	a
+	jz	gd1		; if empty response - use current disk
+	inx	h
+	push	h
+	call	addhla
+	mvi	m,0
+	pop	h
+	mov	a,m
+	call	upper
+	sui	'A'		; validate drive
+	jc	errd
+	cpi	16
+	jnc	errd
+	mov	e,a
+	inx	h
+	mov	a,m
+	ora	a
+	jz	gdok
+	cpi	':'
+	jnz	errd
+	inx	h
+	mov	a,m
+	ora	a
+	jnz	errd
+gdok:	mov	a,e
+	sta	disk
+gd1:	lda	disk
+	mov	e,a
+	mvi	c,.getdpb
+	call	bdos		; get DPB address
+	inx	h
+	mov	a,h
+	ora	l
+	jz	errd
+	dcx	h
+	mov	e,m		; fetch sectors per track
+	inx	h
+	mov	d,m
+	xchg
+	shld	spt
+	lxi	h,12
+	dad	d
+	mov	e,m		; fetch reserved tracks
+	inx	h
+	mov	d,m
+	xchg
+	shld	offs
+	xchg
+	inx	h
+	mov	a,m
+	sta	psh
+	ret
+errd:	lxi	d,errdsk
+	mvi	c,.print
+	call	bdos
+	jmp	gd0
+
+askd:	db	'Enter destination drive [$'
+askd1:	db	']: $'
+errdsk:	db	'Invalid drive, try again',cr,lf,'$'
+
+; Ask for a filename and load the file into memory
+
+ldimg:	lxi	d,askf
+	mvi	c,.print
+	call	bdos		; prompt for filename
+	lxi	h,cpmbuf
+	mvi	m,125
+	xchg
+	mvi	c,.getln
+	call	bdos		; get response
+	call	crlf
+	lxi	h,cpmbuf
+	inx	h
+	mov	a,m
+	ora	a
+	jz	wboot		; exit if no filename specified
+	inx	h
+	call	addhla
+	mvi	m,0
+	lxi	d,pfcb
+	mvi	c,.parse
+	call	bdos		; parse filename
+	inx	h
+	mov	a,h
+	ora	l
+	jnz	ok
+	lxi	d,errfn
+err1:	mvi	c,.print
+	call	bdos
+	jmp	ldimg
+ok:	lxi	h,0
+	shld	cpmfcb+12	; to work around a ZP/M bug
+	shld	cpmfcb+14
+	lxi	d,cpmfcb
+	mvi	c,.open
+	call	bdos		; open file
+	inr	a
+	jnz	ok1
+	lxi	d,errnf
+	jmp	err1
+ok1:	lhld	offs		; get reserved tracks
+	mov	c,l		;  into BC
+	mov	b,h
+	lhld	spt		; get sectors per track
+	xchg			;  into DE
+	lxi	h,0
+ld1:	mov	a,b
+	ora	c
+	jz	ld2
+	dad	d		; compute max sectors
+	dcx	b
+	jmp	ld1
+ld2:	mov	a,h
+	ora	l
+	jz	lderr1		; cannot load - no reserved tracks
+	lxi	d,filbuf
+ld3:	push	h		; save counter
+	push	d		; save buffer address
+	mvi	c,.dma
+	call	bdos
+	lxi	d,cpmfcb
+	mvi	c,.read
+	call	bdos		; read sector
+	pop	d
+	lxi	h,80h
+	dad	d		; advance load pointer
+	xchg
+	pop	h
+	ora	a		; end of file?
+	jnz	ld4
+	dcx	h
+	mov	a,h
+	ora	l
+	jnz	ld3
+ld4:	lxi	d,cpmfcb
+	mvi	c,.close
+	call	bdos
+				; ignore too large files by now...
+	ret
+
+lderr1:	lxi	d,errnt
+	mvi	c,.print
+	call	bdos
+	jmp	wboot
+
+askf:	db	'Enter system image file name: $'
+errfn:	db	'Invalid filename, try again',cr,lf,'$'
+errnf:	db	'File not found, try again',cr,lf,'$'
+errnt:	db	'The disk has no reserved tracks',cr,lf,'$'
+
+pfcb:	dw	cpmbuf+2,cpmfcb
+
+; convert character to uppercase
+
+upper:	cpi	'a'
+	rc
+	cpi	'z'+1
+	rnc
+	ani	5Fh
+	ret
+
+; display CR/LF
+
+crlf:	mvi	e,cr
+	mvi	c,.putch
+	call	bdos
+	mvi	e,lf
+	mvi	c,.putch
+	call	bdos
+	ret
+
+; add A to HL
+
+addhla:	add	l
+	mov	l,a
+	rnc
+	inr	h
+	ret
+
+; shift HL right A times
+
+shrhl:	ora	a
+	rz
+	mov	c,a
+shr1:	ora	a
+	mov	a,h
+	rar
+	mov	h,a
+	mov	a,l
+	rar
+	mov	l,a
+	dcr	c
+	jnz	shr1
+	ret
+
+; shift HL left C times
+
+shlhl:	ora	a
+	rz
+	mov	c,a
+shl1:	dad	h
+	dcr	c
+	jnz	shl1
+	ret
+
+; save system image into the reserved tracks using BIOS calls
+
+putsys:	lda	disk
+	mov	c,a
+	call	seldsk		; select disk
+	mov	a,h
+	ora	l
+	jz	serr
+	mvi	a,1
+	sta	bpb+1
+	call	setbnk
+	lxi	h,128
+	lda	psh
+	call	shlhl		; compute physical sector size
+	shld	secsz		;  (GIDE = 512)
+	lhld	spt
+	lda	psh
+	call	shrhl		; compute number of physical sectors per track
+	mov	a,l		;  (GIDE = 16)
+	sta	pspt
+	lxi	h,filbuf
+	shld	dmaad
+	lxi	b,0		; track number
+loopt:	push	b
+	call	settrk
+	lxi	b,0		; sector number
+	lda	pspt
+	mov	e,a		; sector counter
+loop:	push	b
+	push	d
+	call	setsec		; set sector
+	lhld	dmaad
+	mov	b,h
+	mov	c,l
+	call	setdma		; set buffer address
+	mvi	c,1
+	call	write		; write the physical sector
+	ora	a
+	jnz	werr
+	lhld	dmaad
+	xchg
+	lhld	secsz
+	dad	d
+	shld	dmaad
+	pop	d
+	pop	b
+	inx	b		; ++sector
+	dcr	e		; --count
+	jnz	loop
+	pop	b
+	inx	b		; ++track
+	lda	offs
+	cmp	c		; up to the number of reserved tracks
+	jnz	loopt
+	lxi	d,done
+	mvi	c,.print
+	call	bdos
+	ret
+
+seldsk:	mvi	a,9
+	jmp	biosfn
+
+settrk:	mvi	a,10
+	jmp	biosfn
+
+setsec:	mvi	a,11
+	jmp	biosfn
+
+setdma:	mvi	a,12
+	jmp	biosfn
+
+setbnk:	mvi	a,28
+	jmp	biosfn
+
+write:	mvi	a,14
+biosfn:	sta	bpb
+	shld	bpb+6
+	xchg
+	shld	bpb+4
+	mov	l,c
+	mov	h,b
+	shld	bpb+2
+	mvi	c,50
+	lxi	d,bpb
+	call	bdos
+	ret
+
+serr:	lxi	d,semsg
+	jmp	ex1
+werr:	lxi	d,errmsg
+ex1:	mvi	c,9
+	call	bdos
+	jmp	0
+
+errmsg:	db	'Write error',cr,lf,'$'
+semsg:	db	'Select error',cr,lf,'$'
+done:	db	'Done.',cr,lf,'$'
+
+	dseg
+
+disk:	ds	1	; destination disk
+spt:	ds	2	; sectors per track
+offs:	ds	2	; reserved tracks
+psh:	ds	1	; physical record shift factor
+
+secsz:	ds	2	; physical sector size
+pspt:	ds	1
+dmaad:	ds	2
+bpb:	ds	8
+
+	ds	128
+stack	equ	$
+
+filbuf	equ	$
+
+	end	start
+

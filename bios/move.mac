@@ -1,0 +1,96 @@
+	title	'Bank & Move Module for the Modular CP/M 3 BIOS'
+
+;	CP/M-80 Version 3	-- Modular BIOS
+;	Bank and Move Module for P112
+;	Initial version 1.0
+;	Compile with M80
+
+	public	?move,?xmove,?bank
+
+	extrn	?get$bank$bbr,?abs$addr
+	extrn	@cbnk,@dbnk,@dma
+
+	.z80
+z80182	equ	1
+	include	Z180.INC
+	include	P112EQU.INC
+
+
+	cseg	; must be in common memory
+
+?xmove:
+    if banked
+	ld	(src$bnk),bc	; c -> src$bnk, b -> dst$bnk
+    endif
+	ret
+
+?move:
+	ex	de,hl		; we are passed source in DE and dest in HL
+    if banked
+	ld	a,(src$bnk)	; contains 0FFh if normal block move
+	inc	a
+	jr	nz,inter$bank$move
+    endif
+	ldir			; use Z80 block move instruction
+	ex	de,hl		; need next address in same regs
+	ret
+
+; select bank in A
+
+?bank:
+    if banked
+	call	?get$bank$bbr
+	out0	(bbr),a
+    endif
+	ret
+
+    if banked
+
+inter$bank$move:		; source in HL, dest in DE, count in BC
+				; NOTE: cannot use the Z180 DMA since
+				; it cannot do transfers to logical
+				; addresses.
+	ld	a,(src$bnk)
+	call	?get$bank$bbr
+	ld	(src$bbr),a
+	ld	a,(dst$bnk)
+	call	?get$bank$bbr
+	ld	(dst$bbr),a
+	ex	af,af'
+	push	af
+	ex	af,af'
+mv$blk:
+	ld	a,(src$bbr)
+	out0	(bbr),a
+	ld	a,(hl)
+	ex	af,af'
+	ld	a,(dst$bbr)
+	out0	(bbr),a
+	ex	af,af'
+	ld	(de),a
+	inc	hl
+	inc	de
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,mv$blk
+	ld	a,(@cbnk)
+	call	?bank
+	ex	af,af'
+	pop	af
+	ex	af,af'
+	ld	a,0FFh
+	ld	(src$bnk),a
+	ex	de,hl		; return with src in DE, dst in HL, count = 0
+	ret
+
+src$bnk: db	0FFh
+dst$bnk: db	0FFh
+
+src$bbr: db	0
+dst$bbr: db	0
+
+    endif
+
+	end
+

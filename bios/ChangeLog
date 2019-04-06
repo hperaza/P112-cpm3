@@ -1,0 +1,53 @@
+1/2/04
+
+- Load CCP from M:, then C:, then A:
+- fdinit: copy default DPB blocks.
+- fdio.mac: selold: reset FDC
+- init ramdisk: clear the first 32 sectors (was 16)
+- time.mac: use local BIOS stack, cleaned up DS1202 routines.
+
+4/1/05
+
+- Changes to load CCP.
+- fdio.mac: removed conditional motor-on sofware delay.
+- hdio.mac: read disk ID, save/restore previous bank.
+- time.mac: use Z180 mlt command when *365, handle Y2K properly.
+
+5/6/05
+
+- hdio.mac: read partition table (preliminary).
+
+24/6/06
+
+- boot.mac: call ?gide$init, display GIDE drive letter and partition size.
+- hdio.mac: read partition table, setup dynamic drive params accordingly.
+
+27/5/07
+
+- boot.mac: loader passes default drive in cdisk; display shorter GIDE msgs.
+- boot.mac: only try to load CCP from C: if the partition exists.
+- chario.mac: mask high ASCII bit on output.
+- fdio.mac: use polled I/O.
+- time.mac: comvert hour to 24-hour format; compute DOW accordingly;
+  allow setting the date; code cleanup.
+
+28/5/07
+
+- misc.mac: better AHEX routine.
+
+15/8/07
+
+- Better XMOVE routine.
+- Use default system disk to load CCP, instead of cdisk from loader.
+
+16/8/07
+
+- time.mac: load contents of CMOS memory.
+- chario.mac: allow 38400 baud.
+
+17/8/07
+
+- fdio.mac: use NV RAM parameters for the floppy drives.
+- chario.mac: set baud rates and flow control according to NV RAM.
+- chario.mac: fixed stupid bug (inc h instead of inc hl)
+

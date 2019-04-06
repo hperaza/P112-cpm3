@@ -1,0 +1,92 @@
+; Copies system image from address 0900h to the reserved tracks of disk C.
+; CP/M 3.0 only.
+
+	cseg
+
+bdos	equ	5
+
+cpsys:	mvi	c,2		; disk C
+	call	seldsk
+	mov	a,h
+	ora	l
+	jz	serr
+	mvi	a,1
+	sta	bpb+1
+	call	setbnk
+	lxi	h,900h
+	shld	dmaad
+	lxi	b,0		; track
+loopt:	push	b
+	call	settrk
+	lxi	b,0		; sector
+	mvi	e,16		; 16 spt (UZI track)
+loop:	push	b
+	push	d
+	call	setsec		; set sector
+	lhld	dmaad
+	mov	b,h
+	mov	c,l
+	call	setdma		; set buff address
+	mvi	c,1
+	call	write		; write the sector (512 bytes)
+	ora	a
+	jnz	werr
+	lhld	dmaad
+	lxi	d,512
+	dad	d
+	shld	dmaad
+	pop	d
+	pop	b
+	inx	b		; ++sector
+	dcr	e		; --count
+	jnz	loop
+	pop	b
+	inx	b		; ++track
+	mov	a,c
+	cpi	1		; just one track by now
+	jnz	loopt
+	jmp	0		; exit
+
+seldsk:	mvi	a,9
+	jmp	biosfn
+
+settrk:	mvi	a,10
+	jmp	biosfn
+
+setsec:	mvi	a,11
+	jmp	biosfn
+
+setdma:	mvi	a,12
+	jmp	biosfn
+
+setbnk:	mvi	a,28
+	jmp	biosfn
+
+write:	mvi	a,14
+biosfn:	sta	bpb
+	shld	bpb+6
+	xchg
+	shld	bpb+4
+	mov	l,c
+	mov	h,b
+	shld	bpb+2
+	mvi	c,50
+	lxi	d,bpb
+	call	bdos
+	ret
+
+serr:	lxi	d,semsg
+	jmp	ex1
+werr:	lxi	d,errmsg
+ex1:	mvi	c,9
+	call	bdos
+	jmp	0
+
+errmsg:	db	'Write error$'
+semsg:	db	'Select error$'
+
+dmaad:	ds	2
+bpb:	ds	8
+
+	end	cpsys
+

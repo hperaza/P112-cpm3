@@ -1,0 +1,58 @@
+	cseg
+
+; TODO:
+; - read disk param table and erase the correct number of dir
+;   entries
+
+wbootv	equ	0
+
+inim:	lxi	h,0080h
+	mvi	c,80h
+fill:	mvi	m,0e5h
+	inx	h
+	dcr	c
+	jnz	fill
+	mvi	c,12		; drive M
+	call	seldsk
+	mov	a,h
+	ora	l
+	jz	wbootv
+	lxi	b,0
+	call	settrk
+	lxi	b,0080h
+	call	setdma
+	lxi	b,0
+	mvi	e,16
+loop:	push	b
+	push	d
+	call	setsec
+	call	write
+	pop	d
+	pop	b
+	inx	b
+	dcr	e
+	jnz	loop
+	jmp	wbootv
+
+seldsk:	lxi	h,24
+	jmp	biosfn
+
+settrk:	lxi	h,27
+	jmp	biosfn
+
+setsec:	lxi	h,30
+	jmp	biosfn
+
+setdma:	lxi	h,33
+	jmp	biosfn
+
+write:	lxi	h,39
+biosfn:	push	d
+	xchg
+	lhld	wbootv+1
+	dad	d
+	pop	d
+	pchl
+
+	end	inim
+

@@ -1,0 +1,178 @@
+	cseg
+
+wboot	equ	0
+bdos	equ	5
+cpmbuf	equ	80h
+
+cr	equ	0Dh
+lf	equ	0Ah
+
+; TODO:
+; - read disk param table and erase the correct number of dir entries
+
+inic:	lxi	sp,stack
+	mvi	c,12
+	call	bdos		; get BDOS version
+	mov	a,h
+	ora	a
+	jnz	verr		; only CP/M
+	mov	a,l
+	cpi	3
+	jc	verr		; 3.0 or higher
+again:	lxi	d,prompt	; prompt user
+	mvi	c,9
+	call	bdos
+	lxi	d,cpmbuf	; point to console buffer
+	mvi	a,10		; max 10 chars to input
+	stax	d
+	xra	a
+	inx	d
+	stax	d
+	inx	d
+	stax	d
+	lxi	d,cpmbuf
+	mvi	c,10
+	call	bdos		; get user response
+	lxi	d,crlf
+	mvi	c,9
+	call	bdos
+	lda	80h+2
+	ani	5Fh
+	sui	'A'
+	jc	errd
+	cpi	'F'-'A'+1
+	jnc	errd
+	sta	diskno
+	adi	'A'
+	sta	diskl
+	lxi	d,warn		; show warning
+	mvi	c,9
+	call	bdos
+	lxi	d,cpmbuf	; point to console buffer
+	mvi	a,10		; max 10 chars to input
+	stax	d
+	xra	a
+	inx	d
+	stax	d
+	inx	d
+	stax	d
+	lxi	d,cpmbuf
+	mvi	c,10
+	call	bdos		; get user response
+	lxi	d,crlf
+	mvi	c,9
+	call	bdos
+	lda	cpmbuf+2
+	cpi	'y'
+	jz	erac
+	cpi	'Y'
+	jz	erac
+	jmp	wboot
+errd:	lxi	d,badpn
+	mvi	c,9
+	call	bdos
+	jmp	again
+erac:	lxi	h,1000h		; sector buffer at 1000h
+	lxi	b,512		; one HD sector is 512 bytes
+fill:	mvi	m,0E5h		; fill it with E5
+	inx	h
+	dcx	b
+	mov	a,b
+	ora	c
+	jnz	fill
+	lda	diskno
+	mov	c,a
+	call	seldsk		; select disk
+	mov	a,h
+	ora	l
+	jz	serr
+	lxi	b,1000h
+	call	setdma		; set DMA address to 1000h
+	mvi	a,1
+	sta	bpb+1
+	call	setbnk		; and select bank 1 for disk I/O
+	lxi	b,2		; skip boot tracks, start from sector 2
+loopt:	push	b
+	call	settrk		; set track
+	lxi	b,0		; start from sector 0
+	mvi	e,16		; 16 sectors/track
+loop:	push	b
+	push	d
+	call	setsec		; set sector
+	mvi	c,1
+	call	write		; write physical sector (512 bytes)
+	ora	a
+	jnz	werr
+	pop	d
+	pop	b
+	inx	b
+	dcr	e
+	jnz	loop
+	pop	b
+	inx	b
+	mov	a,c
+	cpi	2+8		; erase 8 tracks (2048 dir entries)
+	jnz	loopt
+	mvi	c,13
+	call	bdos		; reset BDOS
+	lxi	d,done
+	mvi	c,9
+	call	bdos
+	jmp	wboot		; exit
+
+seldsk:	mvi	a,9
+	jmp	biosfn
+
+settrk:	mvi	a,10
+	jmp	biosfn
+
+setsec:	mvi	a,11
+	jmp	biosfn
+
+setdma:	mvi	a,12
+	jmp	biosfn
+
+setbnk:	mvi	a,28
+	jmp	biosfn
+
+write:	mvi	a,14
+biosfn:	sta	bpb
+	shld	bpb+6
+	xchg
+	shld	bpb+4
+	mov	l,c
+	mov	h,b
+	shld	bpb+2
+	mvi	c,50
+	lxi	d,bpb
+	call	bdos
+	ret
+
+verr:	lxi	d,vemsg
+	jmp	ex1
+serr:	lxi	d,semsg
+	jmp	ex1
+werr:	lxi	d,errmsg
+ex1:	mvi	c,9
+	call	bdos
+	jmp	wboot
+
+vemsg:	db	'Requires CP/M 3$'
+prompt:	db	'Enter drive to initialize: $'
+warn:	db	'This program will erase the directory of drive '
+diskl:	db	'x:',cr,lf
+	db	'All files will be lost, ARE YOU SURE (Y/N)? $'
+errmsg:	db	'Write error$'
+semsg:	db	'Select error$'
+done:	db	'Done.$'
+badpn:	db	'Invalid drive, try again'
+crlf:	db	cr,lf,'$'
+diskno:	ds	1
+
+bpb:	ds	8
+
+	ds	256
+stack	equ	$
+
+	end	inic
+
